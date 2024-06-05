@@ -7,6 +7,7 @@ from torch_geometric.utils import from_networkx
 from torch import save
 import argparse
 from memory_profiler import profile
+from zipfile import ZipFile
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process integers for train-test split.')
@@ -21,7 +22,7 @@ n_train_timesteps = args.n_train_timesteps
 print("Loading data...")
 
 # Load data
-df = pd.read_csv('data/subnational/gid_timem_best.csv', engine='pyarrow').dropna(subset='best')
+df = pd.read_csv(ZipFile('data/subnational/gid_timem_best.csv.zip').open('gid_timem_best.csv'), engine='pyarrow').dropna(subset='best')
 
 # Filter for gids that have more than 3 percent of timestamps
 freq = (df.value_counts('gid') / df.value_counts('gid').max())
@@ -56,7 +57,7 @@ node_list = df[['log_best', 'gidtime_str', 'train', 'test'] + newcols.columns.to
 none_missing = pd.Series(none_missing).astype(str)
 
 # Edges between nodes (non-temporal edges)
-coordinate_dict = pd.read_pickle('data/subnational/coordinates.pkl')
+coordinate_dict = pd.read_pickle(ZipFile('data/subnational/coordinates.pkl.zip').open('coordinates.pkl'))
 coordinate_dict = {key: value for (val, key), value in coordinate_dict.items() if val == 1}
 
 tims = df.time_str.unique()

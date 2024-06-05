@@ -3,3 +3,4 @@ numpy
 networkx
 torch
 torch-geometric
+pyarrow

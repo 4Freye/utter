@@ -6,6 +6,7 @@ import gc
 from torch_geometric.utils import from_networkx
 from torch import save
 import argparse
+from memory_profiler import profile
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process integers for train-test split.')
@@ -20,7 +21,7 @@ n_train_timesteps = args.n_train_timesteps
 print("Loading data...")
 
 # Load data
-df = pd.read_csv('data/eric_subnational/gid_timem_best.csv', engine='pyarrow').dropna(subset='best')
+df = pd.read_csv('data/subnational/gid_timem_best.csv', engine='pyarrow').dropna(subset='best')
 
 # Filter for gids that have more than 3 percent of timestamps
 freq = (df.value_counts('gid') / df.value_counts('gid').max())
@@ -55,7 +56,7 @@ node_list = df[['log_best', 'gidtime_str', 'train', 'test'] + newcols.columns.to
 none_missing = pd.Series(none_missing).astype(str)
 
 # Edges between nodes (non-temporal edges)
-coordinate_dict = pd.read_pickle('data/eric_subnational/coordinates.pkl')
+coordinate_dict = pd.read_pickle('data/subnational/coordinates.pkl')
 coordinate_dict = {key: value for (val, key), value in coordinate_dict.items() if val == 1}
 
 tims = df.time_str.unique()
@@ -67,18 +68,23 @@ del coordinate_dict_timestr; del coordinate_dict; gc.collect()
 # Temporal edges
 temporal_edges = []
 for i in range(len(tims) - 1):
-    # Create tuples for the current and next elements in tims
     current_edges = list(zip(none_missing + tims[i], none_missing + tims[i + 1]))
     temporal_edges.extend(current_edges)
 
 print("Creating graph...")
 
+def add_edges_in_batches(G, edges, batch_size=1000):
+    for i in range(0, len(edges), batch_size):
+        batch = edges[i:i + batch_size]
+        G.add_edges_from(batch)
+        print(f"Added batch {i // batch_size + 1}")
+
 # Add nodes, spatial edges, and temporal edges to graph
 g = nx.Graph()
 g.add_nodes_from(node_list)
-g.add_edges_from(spatial_edges, weight=1)
+add_edges_in_batches(g, spatial_edges)
 g = g.to_directed()
-g.add_edges_from(temporal_edges, weight=2)
+add_edges_in_batches(g, temporal_edges)
 
 # Remove nodes with no data from graph
 g_nodes = pd.Series(g.nodes())

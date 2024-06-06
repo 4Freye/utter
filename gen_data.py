@@ -1,3 +1,4 @@
+#%%
 # Import packages
 import pandas as pd
 import numpy as np
@@ -6,18 +7,19 @@ import gc
 from torch_geometric.utils import from_networkx
 from torch import save
 import argparse
-from memory_profiler import profile
 from zipfile import ZipFile
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process integers for train-test split.')
-parser.add_argument('--min_preceding_timesteps_for_train', type=int, default=1, help='Minimum preceding timesteps for training')
+parser.add_argument('--min_preceding_timesteps_for_train', type=int, default=0, help='Minimum preceding timesteps for training')
 parser.add_argument('--n_train_timesteps', type=int, default=3, help='Number of training timesteps')
+parser.add_argument('--n_val_timesteps', type=int, default=1, help='Number of validation timesteps')
 args = parser.parse_args()
 
 # Parameters
 min_preceding_timesteps_for_train = args.min_preceding_timesteps_for_train
 n_train_timesteps = args.n_train_timesteps
+n_val_timesteps = args.n_val_timesteps
 
 print("Loading data...")
 
@@ -35,7 +37,7 @@ df['log_best'] = np.log1p(df.best); df.drop(columns='best', inplace=True)
 df.sort_values(by='timem', inplace=True)
 newcols = pd.concat([df.groupby('gid').log_best.shift(-h).rename(f'y_{h}') for h in range(1, 7)], axis=1)
 df = pd.concat([df, newcols], axis=1)
-# df = df.loc[(df.timem.dt.year == 2019) & (df.timem.dt.month < 7)]  # for a small sample to test code
+df = df.loc[(df.timem.dt.year == 2019) & (df.timem.dt.month < 7)]  # for a small sample to test code
 df.reset_index(drop=True, inplace=True)
 
 time_dict = {key: val for key, val in zip(df.timem.drop_duplicates(), df.timem.drop_duplicates().dt.strftime('%Y_%m'))}
@@ -44,14 +46,15 @@ df['gidtime_str'] = df.gid.astype(str) + df.time_str
 
 # Add train and test attributes to DataFrame
 df['preceding_timesteps'] = df.groupby('gid').cumcount()
-df['train'] = (df['preceding_timesteps'] >= min_preceding_timesteps_for_train).astype(int)
-df['test'] = (df['preceding_timesteps'] < min_preceding_timesteps_for_train).astype(int)
+df['train'] = (df['preceding_timesteps'] >= min_preceding_timesteps_for_train)
+df['val'] = (df['preceding_timesteps'] > min_preceding_timesteps_for_train + n_train_timesteps)
+df['test'] = (df['preceding_timesteps'] > min_preceding_timesteps_for_train + n_train_timesteps + n_val_timesteps)
 
 print("Processing node data...")
 
 # Node data
-node_list = df[['log_best', 'gidtime_str', 'train', 'test'] + newcols.columns.tolist()].set_index('gidtime_str'). \
-    apply(lambda row: (row.name, {'log_best': row['log_best'], 'y': [row[f'y_{i}'] for i in range(1, 7)], 'train': row['train'], 'test': row['test']}), axis=1). \
+node_list = df[['log_best', 'gidtime_str', 'train', 'test', 'val'] + newcols.columns.tolist()].set_index('gidtime_str'). \
+    apply(lambda row: (row.name, {'log_best': row['log_best'], 'y': [row[f'y_{i}'] for i in range(1, 7)], 'train': row['train'], 'test': row['test'], 'val':row['val']}), axis=1). \
     tolist()
 
 none_missing = pd.Series(none_missing).astype(str)
@@ -74,18 +77,18 @@ for i in range(len(tims) - 1):
 
 print("Creating graph...")
 
-def add_edges_in_batches(G, edges, batch_size=1000):
+def add_edges_in_batches(G, edges, batch_size=1000, weight=1):
     for i in range(0, len(edges), batch_size):
         batch = edges[i:i + batch_size]
-        G.add_edges_from(batch)
-        print(f"Added batch {i // batch_size + 1}")
+        G.add_edges_from(batch, weight=weight)
+        # print(f"Added batch {i // batch_size + 1}")
 
 # Add nodes, spatial edges, and temporal edges to graph
 g = nx.Graph()
 g.add_nodes_from(node_list)
-add_edges_in_batches(g, spatial_edges)
+add_edges_in_batches(g, spatial_edges, weight = 1)
 g = g.to_directed()
-add_edges_in_batches(g, temporal_edges)
+add_edges_in_batches(g, temporal_edges, weight=2)
 
 # Remove nodes with no data from graph
 g_nodes = pd.Series(g.nodes())
@@ -99,3 +102,4 @@ pyg = from_networkx(g)
 save(pyg, 'output/ucdp_graph.pt')
 
 print("Process completed successfully.")
+# %%
